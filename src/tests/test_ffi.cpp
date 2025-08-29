@@ -827,7 +827,7 @@ class FFI_Cert_Creation_Test final : public FFI_Test {
                }
 
                botan_x509_cert_t ca_cert;
-               TEST_FFI_OK(botan_x509_cert_create_self_signed,
+               TEST_FFI_OK(botan_x509_cert_params_builder_into_self_signed,
                            (&ca_cert, ca_key, ca_builder, rng, not_before, not_after, nullptr, hash_fn.c_str(), ""));
 
                botan_x509_cert_params_builder_t req_builder;
@@ -835,7 +835,7 @@ class FFI_Cert_Creation_Test final : public FFI_Test {
                TEST_FFI_OK(botan_x509_cert_params_builder_add_allowed_usage, (req_builder, 1 << 15));
 
                botan_x509_pkcs10_req_t req;
-               TEST_FFI_OK(botan_x509_pkcs10_req_create,
+               TEST_FFI_OK(botan_x509_cert_params_builder_into_pkcs10_req,
                            (&req, cert_key, req_builder, rng, hash_fn.c_str(), nullptr, nullptr));
 
                int res;
@@ -915,10 +915,9 @@ class FFI_Cert_Creation_Test final : public FFI_Test {
 
                uint64_t expire_time;
                uint8_t reason;
-               TEST_FFI_OK(botan_x509_crl_get_entry, (new_crl, 0, serial_out.data(), &out_len, &expire_time, &reason));
                botan_mp_t serial_from_crl;
                TEST_FFI_OK(botan_mp_init, (&serial_from_crl));
-               TEST_FFI_OK(botan_mp_from_bin, (serial_from_crl, serial_out.data(), out_len));
+               TEST_FFI_OK(botan_x509_crl_get_entry, (new_crl, 0, serial_from_crl, &expire_time, &reason));
                TEST_FFI_RC(1, botan_mp_equal, (serial, serial_from_crl));
                result.confirm("expire time is correct", now - 5 <= expire_time && expire_time <= now + 5);
                result.confirm("reason is correct", reason == 1);
@@ -1113,7 +1112,7 @@ class FFI_X509_RPKI_Test final : public FFI_Test {
 
                botan_x509_cert_t ca_cert;
                TEST_FFI_OK(
-                  botan_x509_cert_create_self_signed,
+                  botan_x509_cert_params_builder_into_self_signed,
                   (&ca_cert, ca_key, ca_builder, rng, not_before, not_after, nullptr, hash_fn.c_str(), nullptr));
 
                botan_x509_cert_params_builder_t req_builder;
@@ -1134,7 +1133,7 @@ class FFI_X509_RPKI_Test final : public FFI_Test {
                TEST_FFI_OK(botan_x509_ext_as_blocks_destroy, (req_as_blocks));
 
                botan_x509_pkcs10_req_t req;
-               TEST_FFI_OK(botan_x509_pkcs10_req_create,
+               TEST_FFI_OK(botan_x509_cert_params_builder_into_pkcs10_req,
                            (&req, cert_key, req_builder, rng, hash_fn.c_str(), nullptr, nullptr));
 
                botan_x509_cert_t cert;
