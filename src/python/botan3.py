@@ -710,6 +710,73 @@ def const_time_compare(x: str | bytes, y: str | bytes) -> bool:
 MPILike = Union[str, "MPI", Any, None]  #: Alias for parameters that get turned into an MPI.
 
 #
+# RNG
+#
+class RandomNumberGenerator:
+    """Previously ``rng``
+
+    Type 'user' also allowed (userspace HMAC_DRBG seeded from system
+    rng). The system RNG is very cheap to create, as just a single file
+    handle or CSP handle is kept open, from first use until shutdown,
+    no matter how many 'system' rng instances are created. Thus it is
+    easy to use the RNG in a one-off way, with `botan.RandomNumberGenerator().get(32)`.
+
+    When Botan is configured with TPM 2.0 support, also 'tpm2' is allowed
+    to instantiate a TPM-backed RNG. Note that this requires passing
+    additional named arguments ``tpm2_context=`` with a ``TPM2Context`` and
+    (optionally) ``tpm2_sessions=`` with one or more ``TPM2Session`` objects.
+
+    Constructs a RandomNumberGenerator of type rng_type.
+    Available RNG types are:
+
+    * 'system': Adapter to the operating system's RNG
+    * 'user':   Software-PRNG that is auto-seeded by the system RNG
+    * 'null':   Mock-RNG that fails if randomness is pulled from it
+    * 'hwrng':  Adapter to an available hardware RNG (platform dependent)
+    * 'tpm2':   Adapter to a TPM 2.0 RNG
+                (needs additional named arguments tpm2_context= and, optionally, tpm2_sessions=)"""
+
+    def __init__(self, rng_type: str = 'system', **kwargs):
+        self.__obj = c_void_p(0)
+        if rng_type == 'tpm2':
+            ctx = kwargs.pop("tpm2_context", None)
+            if not ctx or not isinstance(ctx, TPM2Context):
+                raise BotanException("Cannot instantiate a TPM2-based RNG without a TPM2 context, pass tpm2_context= argument?")
+            sessions = TPM2Session.session_bundle_(kwargs.pop("tpm2_sessions", None))
+            if kwargs:
+                raise BotanException("Unexpected arguments for TPM2 RNG: %s" % (", ".join(kwargs.keys())))
+            _DLL.botan_tpm2_rng_init(byref(self.__obj), ctx.handle_(), *sessions)
+        else:
+            if kwargs:
+                raise BotanException("Unexpected arguments for RNG type %s: %s" % (rng_type, ", ".join(kwargs.keys())))
+            _DLL.botan_rng_init(byref(self.__obj), _ctype_str(rng_type))
+
+    def __del__(self):
+        _DLL.botan_rng_destroy(self.__obj)
+
+    def handle_(self):
+        return self.__obj
+
+    def reseed(self, bits: int = 256):
+        """Meaningless on system RNG, on userspace RNG causes a reseed/rekey"""
+        _DLL.botan_rng_reseed(self.__obj, bits)
+
+    def reseed_from_rng(self, source_rng: RandomNumberGenerator, bits: int = 256):
+        """Take bits from the source RNG and use it to seed ``self``"""
+        _DLL.botan_rng_reseed_from_rng(self.__obj, source_rng.handle_(), bits)
+
+    def add_entropy(self, seed: str | bytes):
+        """Add some unpredictable seed data to the RNG"""
+        seedbits = _ctype_bits(seed)
+        _DLL.botan_rng_add_entropy(self.__obj, seedbits, len(seedbits))
+
+    def get(self, length: int) -> bytes:
+        """Return some bytes"""
+        out = create_string_buffer(length)
+        _DLL.botan_rng_get(self.__obj, out, c_size_t(length))
+        return _ctype_bufout(out)
+
+#
 # TPM2
 #
 
@@ -792,139 +859,6 @@ class TPM2UnauthenticatedSession(TPM2Session):
         obj = c_void_p(0)
         _DLL.botan_tpm2_unauthenticated_session_init(byref(obj), ctx.handle_())
         super().__init__(obj)
-
-#
-# RNG
-#
-class RandomNumberGenerator:
-    """Previously ``rng``
-
-    Type 'user' also allowed (userspace HMAC_DRBG seeded from system
-    rng). The system RNG is very cheap to create, as just a single file
-    handle or CSP handle is kept open, from first use until shutdown,
-    no matter how many 'system' rng instances are created. Thus it is
-    easy to use the RNG in a one-off way, with `botan.RandomNumberGenerator().get(32)`.
-
-    When Botan is configured with TPM 2.0 support, also 'tpm2' is allowed
-    to instantiate a TPM-backed RNG. Note that this requires passing
-    additional named arguments ``tpm2_context=`` with a ``TPM2Context`` and
-    (optionally) ``tpm2_sessions=`` with one or more ``TPM2Session`` objects.
-
-    Constructs a RandomNumberGenerator of type rng_type.
-    Available RNG types are:
-
-    * 'system': Adapter to the operating system's RNG
-    * 'user':   Software-PRNG that is auto-seeded by the system RNG
-    * 'null':   Mock-RNG that fails if randomness is pulled from it
-    * 'hwrng':  Adapter to an available hardware RNG (platform dependent)
-    * 'tpm2':   Adapter to a TPM 2.0 RNG
-                (needs additional named arguments tpm2_context= and, optionally, tpm2_sessions=)"""
-
-    def __init__(self, rng_type: str = 'system', **kwargs):
-        self.__obj = c_void_p(0)
-        if rng_type == 'tpm2':
-            ctx = kwargs.pop("tpm2_context", None)
-            if not ctx or not isinstance(ctx, TPM2Context):
-                raise BotanException("Cannot instantiate a TPM2-based RNG without a TPM2 context, pass tpm2_context= argument?")
-            sessions = TPM2Session.session_bundle_(kwargs.pop("tpm2_sessions", None))
-            if kwargs:
-                raise BotanException("Unexpected arguments for TPM2 RNG: %s" % (", ".join(kwargs.keys())))
-            _DLL.botan_tpm2_rng_init(byref(self.__obj), ctx.handle_(), *sessions)
-        else:
-            if kwargs:
-                raise BotanException("Unexpected arguments for RNG type %s: %s" % (rng_type, ", ".join(kwargs.keys())))
-            _DLL.botan_rng_init(byref(self.__obj), _ctype_str(rng_type))
-
-    def __del__(self):
-        _DLL.botan_rng_destroy(self.__obj)
-
-    def handle_(self):
-        return self.__obj
-
-    def reseed(self, bits: int = 256):
-        """Meaningless on system RNG, on userspace RNG causes a reseed/rekey"""
-        _DLL.botan_rng_reseed(self.__obj, bits)
-
-    def reseed_from_rng(self, source_rng: RandomNumberGenerator, bits: int = 256):
-        """Take bits from the source RNG and use it to seed ``self``"""
-        _DLL.botan_rng_reseed_from_rng(self.__obj, source_rng.handle_(), bits)
-
-    def add_entropy(self, seed: str | bytes):
-        """Add some unpredictable seed data to the RNG"""
-        seedbits = _ctype_bits(seed)
-        _DLL.botan_rng_add_entropy(self.__obj, seedbits, len(seedbits))
-
-    def get(self, length: int) -> bytes:
-        """Return some bytes"""
-        out = create_string_buffer(length)
-        _DLL.botan_rng_get(self.__obj, out, c_size_t(length))
-        return _ctype_bufout(out)
-
-#
-# Block cipher
-#
-class BlockCipher:
-    def __init__(self, algo: str | c_void_p):
-
-        if isinstance(algo, c_void_p):
-            self.__obj = algo
-        else:
-            flags = c_uint32(0) # always zero in this API version
-            self.__obj = c_void_p(0)
-            _DLL.botan_block_cipher_init(byref(self.__obj), _ctype_str(algo), flags)
-
-        min_keylen = c_size_t(0)
-        max_keylen = c_size_t(0)
-        mod_keylen = c_size_t(0)
-        _DLL.botan_block_cipher_get_keyspec(self.__obj, byref(min_keylen), byref(max_keylen), byref(mod_keylen))
-
-        self.__min_keylen = min_keylen.value
-        self.__max_keylen = max_keylen.value
-        self.__mod_keylen = mod_keylen.value
-
-        self.__block_size = _DLL.botan_block_cipher_block_size(self.__obj)
-
-    def __del__(self):
-        _DLL.botan_block_cipher_destroy(self.__obj)
-
-    def set_key(self, key: bytes):
-        _DLL.botan_block_cipher_set_key(self.__obj, key, len(key))
-
-    def encrypt(self, pt: bytes) -> Array[c_char]:
-        if len(pt) % self.block_size() != 0:
-            raise Exception("Invalid input must be multiple of block size")
-
-        blocks = c_size_t(len(pt) // self.block_size())
-        output = create_string_buffer(len(pt))
-        _DLL.botan_block_cipher_encrypt_blocks(self.__obj, pt, output, blocks)
-        return output
-
-    def decrypt(self, ct: bytes) -> Array[c_char]:
-        if len(ct) % self.block_size() != 0:
-            raise Exception("Invalid input must be multiple of block size")
-
-        blocks = c_size_t(len(ct) // self.block_size())
-        output = create_string_buffer(len(ct))
-        _DLL.botan_block_cipher_decrypt_blocks(self.__obj, ct, output, blocks)
-        return output
-
-    def algo_name(self) -> str:
-        return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_block_cipher_name(self.__obj, b, bl))
-
-    def clear(self):
-        _DLL.botan_block_cipher_clear(self.__obj)
-
-    def block_size(self) -> int:
-        return self.__block_size
-
-    def minimum_keylength(self) -> int:
-        return self.__min_keylen
-
-    def maximum_keylength(self) -> int:
-        return self.__max_keylen
-
-    def keylength_modulo(self) -> int:
-        return self.__mod_keylen
 
 
 #
@@ -1049,6 +983,9 @@ class MsgAuthCode:
         _DLL.botan_mac_final(self.__obj, out)
         return _ctype_bufout(out)
 
+#
+# Ciphers
+#
 class SymmetricCipher:
     """Previously ``cipher``
 
@@ -1176,6 +1113,71 @@ class SymmetricCipher:
         in which case all plaintext previously processed must be discarded.
         You may call finish() with the entire message"""
         return self._update(txt, True)
+
+
+class BlockCipher:
+    def __init__(self, algo: str | c_void_p):
+
+        if isinstance(algo, c_void_p):
+            self.__obj = algo
+        else:
+            flags = c_uint32(0) # always zero in this API version
+            self.__obj = c_void_p(0)
+            _DLL.botan_block_cipher_init(byref(self.__obj), _ctype_str(algo), flags)
+
+        min_keylen = c_size_t(0)
+        max_keylen = c_size_t(0)
+        mod_keylen = c_size_t(0)
+        _DLL.botan_block_cipher_get_keyspec(self.__obj, byref(min_keylen), byref(max_keylen), byref(mod_keylen))
+
+        self.__min_keylen = min_keylen.value
+        self.__max_keylen = max_keylen.value
+        self.__mod_keylen = mod_keylen.value
+
+        self.__block_size = _DLL.botan_block_cipher_block_size(self.__obj)
+
+    def __del__(self):
+        _DLL.botan_block_cipher_destroy(self.__obj)
+
+    def set_key(self, key: bytes):
+        _DLL.botan_block_cipher_set_key(self.__obj, key, len(key))
+
+    def encrypt(self, pt: bytes) -> Array[c_char]:
+        if len(pt) % self.block_size() != 0:
+            raise Exception("Invalid input must be multiple of block size")
+
+        blocks = c_size_t(len(pt) // self.block_size())
+        output = create_string_buffer(len(pt))
+        _DLL.botan_block_cipher_encrypt_blocks(self.__obj, pt, output, blocks)
+        return output
+
+    def decrypt(self, ct: bytes) -> Array[c_char]:
+        if len(ct) % self.block_size() != 0:
+            raise Exception("Invalid input must be multiple of block size")
+
+        blocks = c_size_t(len(ct) // self.block_size())
+        output = create_string_buffer(len(ct))
+        _DLL.botan_block_cipher_decrypt_blocks(self.__obj, ct, output, blocks)
+        return output
+
+    def algo_name(self) -> str:
+        return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_block_cipher_name(self.__obj, b, bl))
+
+    def clear(self):
+        _DLL.botan_block_cipher_clear(self.__obj)
+
+    def block_size(self) -> int:
+        return self.__block_size
+
+    def minimum_keylength(self) -> int:
+        return self.__min_keylen
+
+    def maximum_keylength(self) -> int:
+        return self.__max_keylen
+
+    def keylength_modulo(self) -> int:
+        return self.__mod_keylen
+
 
 def bcrypt(passwd: str, rng_obj: RandomNumberGenerator, work_factor=10):
     """
