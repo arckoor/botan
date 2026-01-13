@@ -669,7 +669,21 @@ def _ctype_bufout(buf):
 def _hex_encode(buf):
     return hexlify(buf).decode('ascii')
 
+def _load_buf_or_file(filename, buf, file_fn, buf_fn):
+    if filename is None and buf is None:
+        raise BotanException("No filename or buf given")
+    if filename is not None and buf is not None:
+        raise BotanException("Both filename and buf given")
 
+    obj = c_void_p(0)
+
+    if filename is not None:
+        file_fn(byref(obj), _ctype_str(filename))
+    elif buf is not None:
+        bits = _ctype_bits(buf)
+        buf_fn(byref(obj), bits, len(bits))
+
+    return obj
 
 #
 # Versioning
@@ -883,18 +897,9 @@ class HashFunction:
     def __del__(self):
         _DLL.botan_hash_destroy(self.__obj)
 
-    def copy_state(self) -> HashFunction:
-        copy = c_void_p(0)
-        _DLL.botan_hash_copy_state(byref(copy), self.__obj)
-        return HashFunction(copy)
-
     def algo_name(self) -> str:
         """Returns the name of this algorithm"""
         return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_hash_name(self.__obj, b, bl))
-
-    def clear(self):
-        """Clear state"""
-        _DLL.botan_hash_clear(self.__obj)
 
     def output_length(self) -> int:
         """Return output length in bytes"""
@@ -903,6 +908,15 @@ class HashFunction:
     def block_size(self) -> int:
         """Return block size in bytes"""
         return self.__block_size
+
+    def copy_state(self) -> HashFunction:
+        copy = c_void_p(0)
+        _DLL.botan_hash_copy_state(byref(copy), self.__obj)
+        return HashFunction(copy)
+
+    def clear(self):
+        """Clear state"""
+        _DLL.botan_hash_clear(self.__obj)
 
     def update(self, x: str | bytes):
         """Add some input"""
@@ -944,10 +958,6 @@ class MsgAuthCode:
     def __del__(self):
         _DLL.botan_mac_destroy(self.__obj)
 
-    def clear(self):
-        """Clear internal state including the key"""
-        _DLL.botan_mac_clear(self.__obj)
-
     def algo_name(self) -> str:
         """Returns the name of this algorithm"""
         return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_mac_name(self.__obj, b, bl))
@@ -964,6 +974,10 @@ class MsgAuthCode:
 
     def keylength_modulo(self) -> int:
         return self.__mod_keylen
+
+    def clear(self):
+        """Clear internal state including the key"""
+        _DLL.botan_mac_clear(self.__obj)
 
     def set_key(self, key: bytes):
         """Set the key"""
@@ -1139,6 +1153,24 @@ class BlockCipher:
     def __del__(self):
         _DLL.botan_block_cipher_destroy(self.__obj)
 
+    def algo_name(self) -> str:
+        return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_block_cipher_name(self.__obj, b, bl))
+
+    def block_size(self) -> int:
+        return self.__block_size
+
+    def minimum_keylength(self) -> int:
+        return self.__min_keylen
+
+    def maximum_keylength(self) -> int:
+        return self.__max_keylen
+
+    def keylength_modulo(self) -> int:
+        return self.__mod_keylen
+
+    def clear(self):
+        _DLL.botan_block_cipher_clear(self.__obj)
+
     def set_key(self, key: bytes):
         _DLL.botan_block_cipher_set_key(self.__obj, key, len(key))
 
@@ -1159,24 +1191,6 @@ class BlockCipher:
         output = create_string_buffer(len(ct))
         _DLL.botan_block_cipher_decrypt_blocks(self.__obj, ct, output, blocks)
         return output
-
-    def algo_name(self) -> str:
-        return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_block_cipher_name(self.__obj, b, bl))
-
-    def clear(self):
-        _DLL.botan_block_cipher_clear(self.__obj)
-
-    def block_size(self) -> int:
-        return self.__block_size
-
-    def minimum_keylength(self) -> int:
-        return self.__min_keylen
-
-    def maximum_keylength(self) -> int:
-        return self.__max_keylen
-
-    def keylength_modulo(self) -> int:
-        return self.__mod_keylen
 
 
 def bcrypt(passwd: str, rng_obj: RandomNumberGenerator, work_factor=10):
@@ -1302,6 +1316,12 @@ class PublicKey: # pylint: disable=invalid-name
         if not obj:
             obj = c_void_p(0)
         self.__obj = obj
+
+    def __del__(self):
+        _DLL.botan_pubkey_destroy(self.__obj)
+
+    def handle_(self):
+        return self.__obj
 
     @classmethod
     def load(cls, val: str | bytes) -> PublicKey:
@@ -1442,17 +1462,9 @@ class PublicKey: # pylint: disable=invalid-name
         _DLL.botan_pubkey_load_classic_mceliece(byref(pub.handle_()), key, len(key), _ctype_str(cmce_mode))
         return pub
 
-    def __del__(self):
-        _DLL.botan_pubkey_destroy(self.__obj)
-
-    def handle_(self):
-        return self.__obj
-
-    def check_key(self, rng_obj: RandomNumberGenerator, strong: bool = True) -> bool:
-        """Test the key for consistency. If ``strong`` is ``True`` then more expensive tests are performed."""
-        flags = 1 if strong else 0
-        rc = _DLL.botan_pubkey_check_key(self.__obj, rng_obj.handle_(), flags)
-        return rc == 0
+    def algo_name(self) -> str:
+        """Returns the algorithm name"""
+        return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_pubkey_algo_name(self.__obj, b, bl))
 
     def estimated_strength(self) -> int:
         """Returns the estimated strength of this key against known attacks
@@ -1461,9 +1473,11 @@ class PublicKey: # pylint: disable=invalid-name
         _DLL.botan_pubkey_estimated_strength(self.__obj, byref(r))
         return r.value
 
-    def algo_name(self) -> str:
-        """Returns the algorithm name"""
-        return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_pubkey_algo_name(self.__obj, b, bl))
+    def check_key(self, rng_obj: RandomNumberGenerator, strong: bool = True) -> bool:
+        """Test the key for consistency. If ``strong`` is ``True`` then more expensive tests are performed."""
+        flags = 1 if strong else 0
+        rc = _DLL.botan_pubkey_check_key(self.__obj, rng_obj.handle_(), flags)
+        return rc == 0
 
     def export(self, pem: bool = False) -> str | bytes:
         """Exports the public key using the usual X.509 SPKI representation.
@@ -1527,6 +1541,12 @@ class PrivateKey:
         if not obj:
             obj = c_void_p(0)
         self.__obj = obj
+
+    def __del__(self):
+        _DLL.botan_privkey_destroy(self.__obj)
+
+    def handle_(self):
+        return self.__obj
 
     @classmethod
     def load(cls, val: str | bytes, passphrase: str = "") -> PrivateKey:
@@ -1680,21 +1700,15 @@ class PrivateKey:
         _DLL.botan_privkey_load_classic_mceliece(byref(priv.handle_()), key, len(key), _ctype_str(cmce_mode))
         return priv
 
-    def __del__(self):
-        _DLL.botan_privkey_destroy(self.__obj)
-
-    def handle_(self):
-        return self.__obj
+    def algo_name(self) -> str:
+        """Returns the algorithm name"""
+        return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_privkey_algo_name(self.__obj, b, bl))
 
     def check_key(self, rng_obj: RandomNumberGenerator, strong: bool = True) -> bool:
         """Test the key for consistency. If ``strong`` is ``True`` then more expensive tests are performed."""
         flags = 1 if strong else 0
         rc = _DLL.botan_privkey_check_key(self.__obj, rng_obj.handle_(), flags)
         return rc == 0
-
-    def algo_name(self) -> str:
-        """Returns the algorithm name"""
-        return _call_fn_returning_str(32, lambda b, bl: _DLL.botan_privkey_algo_name(self.__obj, b, bl))
 
     def get_public_key(self) -> PublicKey:
         """Return a public_key object"""
@@ -1954,23 +1968,6 @@ class KemDecrypt:
                 bl)
         )
 
-def _load_buf_or_file(filename, buf, file_fn, buf_fn):
-    if filename is None and buf is None:
-        raise BotanException("No filename or buf given")
-    if filename is not None and buf is not None:
-        raise BotanException("Both filename and buf given")
-
-    obj = c_void_p(0)
-
-    if filename is not None:
-        file_fn(byref(obj), _ctype_str(filename))
-    elif buf is not None:
-        bits = _ctype_bits(buf)
-        buf_fn(byref(obj), bits, len(bits))
-
-    return obj
-
-
 #
 # X.509 certificates
 #
@@ -1981,6 +1978,14 @@ class X509Cert: # pylint: disable=invalid-name
 
     def __del__(self):
         _DLL.botan_x509_cert_destroy(self.__obj)
+
+    def handle_(self):
+        return self.__obj
+
+    @classmethod
+    def validation_status(cls, error_code: int) -> str:
+        """Return an informative string associated with the verification return code."""
+        return _ctype_to_str(_DLL.botan_x509_cert_validation_status(c_int(error_code)))
 
     def time_starts(self) -> datetime:
         """Return the time the certificate becomes valid, as a string in form
@@ -2109,9 +2114,6 @@ class X509Cert: # pylint: disable=invalid-name
         rc = _DLL.botan_x509_cert_allowed_usage(self.__obj, c_uint(usage))
         return rc == 0
 
-    def handle_(self):
-        return self.__obj
-
     def verify(self,
                intermediates: list[X509Cert] | None = None,
                trusted: list[X509Cert] | None = None,
@@ -2189,11 +2191,6 @@ class X509Cert: # pylint: disable=invalid-name
 
         return error_code.value
 
-    @classmethod
-    def validation_status(cls, error_code: int) -> str:
-        """Return an informative string associated with the verification return code."""
-        return _ctype_to_str(_DLL.botan_x509_cert_validation_status(c_int(error_code)))
-
     def is_revoked(self, crl: X509CRL) -> bool:
         """Check if the certificate (``self``) is revoked on the given ``crl``."""
         rc = _DLL.botan_x509_is_revoked(crl.handle_(), self.__obj)
@@ -2246,23 +2243,8 @@ class MPI:
             # For int or long (or whatever else), try converting to string:
             _DLL.botan_mp_set_from_str(self.__obj, _ctype_str(str(initial_value)))
 
-    @classmethod
-    def random(cls, rng_obj: RandomNumberGenerator, bits: int) -> MPI:
-        bn = MPI()
-        _DLL.botan_mp_rand_bits(bn.handle_(), rng_obj.handle_(), c_size_t(bits))
-        return bn
-
-    @classmethod
-    def random_range(cls, rng_obj: RandomNumberGenerator, lower: MPI, upper: MPI):
-        bn = MPI()
-        _DLL.botan_mp_rand_range(bn.handle_(), rng_obj.handle_(), lower.handle_(), upper.handle_())
-        return bn
-
     def __del__(self):
         _DLL.botan_mp_destroy(self.__obj)
-
-    def handle_(self):
-        return self.__obj
 
     def __int__(self):
         hexv = _call_fn_viewing_str(lambda vc, vfn: _DLL.botan_mp_view_hex(self.__obj, vc, vfn))
@@ -2270,40 +2252,6 @@ class MPI:
 
     def __repr__(self):
         return _call_fn_viewing_str(lambda vc, vfn: _DLL.botan_mp_view_str(self.__obj, 10, vc, vfn))
-
-    def to_bytes(self) -> Array[c_char]:
-        byte_count = self.byte_count()
-        out_len = c_size_t(byte_count)
-        out = create_string_buffer(out_len.value)
-        _DLL.botan_mp_to_bin(self.__obj, out, byref(out_len))
-        assert out_len.value == byte_count
-        return out
-
-    def is_negative(self) -> bool:
-        rc = _DLL.botan_mp_is_negative(self.__obj)
-        return rc == 1
-
-    def is_positive(self) -> bool:
-        rc = _DLL.botan_mp_is_positive(self.__obj)
-        return rc == 1
-
-    def is_zero(self) -> bool:
-        rc = _DLL.botan_mp_is_zero(self.__obj)
-        return rc == 1
-
-    def is_odd(self) -> bool:
-        return self.get_bit(0) == 1
-
-    def is_even(self) -> bool:
-        return self.get_bit(0) == 0
-
-    def flip_sign(self):
-        _DLL.botan_mp_flip_sign(self.__obj)
-
-    def cmp(self, other: MPI) -> int:
-        r = c_int(0)
-        _DLL.botan_mp_cmp(byref(r), self.__obj, other.handle_())
-        return r.value
 
     def __hash__(self):
         return hash(self.to_bytes())
@@ -2401,33 +2349,47 @@ class MPI:
         _DLL.botan_mp_rshift(self.__obj, self.__obj, c_size_t(shift))
         return self
 
-    def mod_mul(self, other: MPI, modulus: MPI) -> MPI:
-        """Return the multiplication product of ``self`` and ``other`` modulo ``modulus``"""
-        r = MPI()
-        _DLL.botan_mp_mod_mul(r.handle_(), self.__obj, other.handle_(), modulus.handle_())
-        return r
+    def handle_(self):
+        return self.__obj
 
-    def gcd(self, other: MPI) -> MPI:
-        """Return the greatest common divisor of ``self`` and ``other``"""
-        r = MPI()
-        _DLL.botan_mp_gcd(r.handle_(), self.__obj, other.handle_())
-        return r
+    @classmethod
+    def random(cls, rng_obj: RandomNumberGenerator, bits: int) -> MPI:
+        bn = MPI()
+        _DLL.botan_mp_rand_bits(bn.handle_(), rng_obj.handle_(), c_size_t(bits))
+        return bn
 
-    def pow_mod(self, exponent: MPI, modulus: MPI) -> MPI:
-        """Return ``self`` to the ``exponent`` power modulo ``modulus``"""
-        r = MPI()
-        _DLL.botan_mp_powmod(r.handle_(), self.__obj, exponent.handle_(), modulus.handle_())
-        return r
+    @classmethod
+    def random_range(cls, rng_obj: RandomNumberGenerator, lower: MPI, upper: MPI):
+        bn = MPI()
+        _DLL.botan_mp_rand_range(bn.handle_(), rng_obj.handle_(), lower.handle_(), upper.handle_())
+        return bn
+
+    def cmp(self, other: MPI) -> int:
+        r = c_int(0)
+        _DLL.botan_mp_cmp(byref(r), self.__obj, other.handle_())
+        return r.value
+
+    def is_negative(self) -> bool:
+        rc = _DLL.botan_mp_is_negative(self.__obj)
+        return rc == 1
+
+    def is_positive(self) -> bool:
+        rc = _DLL.botan_mp_is_positive(self.__obj)
+        return rc == 1
+
+    def is_zero(self) -> bool:
+        rc = _DLL.botan_mp_is_zero(self.__obj)
+        return rc == 1
+
+    def is_odd(self) -> bool:
+        return self.get_bit(0) == 1
+
+    def is_even(self) -> bool:
+        return self.get_bit(0) == 0
 
     def is_prime(self, rng_obj: RandomNumberGenerator, prob: int = 128) -> bool:
         """Test if ``self`` is prime"""
         return _DLL.botan_mp_is_prime(self.__obj, rng_obj.handle_(), c_size_t(prob)) == 1
-
-    def inverse_mod(self, modulus: MPI) -> MPI:
-        """Return the inverse of ``self`` modulo ``modulus``, or zero if no inverse exists"""
-        r = MPI()
-        _DLL.botan_mp_mod_inverse(r.handle_(), self.__obj, modulus.handle_())
-        return r
 
     def bit_count(self) -> int:
         b = c_size_t(0)
@@ -2448,6 +2410,41 @@ class MPI:
     def set_bit(self, bit: int):
         _DLL.botan_mp_set_bit(self.__obj, c_size_t(bit))
 
+    def to_bytes(self) -> Array[c_char]:
+        byte_count = self.byte_count()
+        out_len = c_size_t(byte_count)
+        out = create_string_buffer(out_len.value)
+        _DLL.botan_mp_to_bin(self.__obj, out, byref(out_len))
+        assert out_len.value == byte_count
+        return out
+
+    def flip_sign(self):
+        _DLL.botan_mp_flip_sign(self.__obj)
+
+    def mod_mul(self, other: MPI, modulus: MPI) -> MPI:
+        """Return the multiplication product of ``self`` and ``other`` modulo ``modulus``"""
+        r = MPI()
+        _DLL.botan_mp_mod_mul(r.handle_(), self.__obj, other.handle_(), modulus.handle_())
+        return r
+
+    def gcd(self, other: MPI) -> MPI:
+        """Return the greatest common divisor of ``self`` and ``other``"""
+        r = MPI()
+        _DLL.botan_mp_gcd(r.handle_(), self.__obj, other.handle_())
+        return r
+
+    def pow_mod(self, exponent: MPI, modulus: MPI) -> MPI:
+        """Return ``self`` to the ``exponent`` power modulo ``modulus``"""
+        r = MPI()
+        _DLL.botan_mp_powmod(r.handle_(), self.__obj, exponent.handle_(), modulus.handle_())
+        return r
+
+    def inverse_mod(self, modulus: MPI) -> MPI:
+        """Return the inverse of ``self`` modulo ``modulus``, or zero if no inverse exists"""
+        r = MPI()
+        _DLL.botan_mp_mod_inverse(r.handle_(), self.__obj, modulus.handle_())
+        return r
+
 
 class OID:
     def __init__(self, obj: c_void_p | None = None):
@@ -2457,33 +2454,6 @@ class OID:
 
     def __del__(self):
         _DLL.botan_oid_destroy(self.__obj)
-
-    def handle_(self):
-        return self.__obj
-
-    @classmethod
-    def from_string(cls, value: str) -> OID:
-        """Create a new OID from dot notation or from a known name"""
-        oid = OID()
-        _DLL.botan_oid_from_string(byref(oid.handle_()), _ctype_str(value))
-        return oid
-
-    def to_string(self) -> str:
-        """Export the OID in dot notation"""
-        return _call_fn_viewing_str(lambda vc, vfn: _DLL.botan_oid_view_string(self.__obj, vc, vfn))
-
-    def to_name(self) -> str:
-        """Export the OID as a name if it has one, else in dot notation"""
-        return _call_fn_viewing_str(lambda vc, vfn: _DLL.botan_oid_view_name(self.__obj, vc, vfn))
-
-    def register(self, name: str):
-        """Register the OID so that it may later be retrieved by the given name"""
-        _DLL.botan_oid_register(self.__obj, _ctype_str(name))
-
-    def cmp(self, other: OID) -> int:
-        r = c_int(0)
-        _DLL.botan_oid_cmp(byref(r), self.__obj, other.handle_())
-        return r.value
 
     def __eq__(self, other: OID | object) -> bool:
         if isinstance(other, OID):
@@ -2521,6 +2491,33 @@ class OID:
         else:
             return False
 
+    def handle_(self):
+        return self.__obj
+
+    @classmethod
+    def from_string(cls, value: str) -> OID:
+        """Create a new OID from dot notation or from a known name"""
+        oid = OID()
+        _DLL.botan_oid_from_string(byref(oid.handle_()), _ctype_str(value))
+        return oid
+
+    def cmp(self, other: OID) -> int:
+        r = c_int(0)
+        _DLL.botan_oid_cmp(byref(r), self.__obj, other.handle_())
+        return r.value
+
+    def to_string(self) -> str:
+        """Export the OID in dot notation"""
+        return _call_fn_viewing_str(lambda vc, vfn: _DLL.botan_oid_view_string(self.__obj, vc, vfn))
+
+    def to_name(self) -> str:
+        """Export the OID as a name if it has one, else in dot notation"""
+        return _call_fn_viewing_str(lambda vc, vfn: _DLL.botan_oid_view_name(self.__obj, vc, vfn))
+
+    def register(self, name: str):
+        """Register the OID so that it may later be retrieved by the given name"""
+        _DLL.botan_oid_register(self.__obj, _ctype_str(name))
+
 
 class ECGroup:
     def __init__(self, obj: c_void_p | None = None):
@@ -2528,11 +2525,20 @@ class ECGroup:
             obj = c_void_p(0)
         self.__obj = obj
 
-    def handle_(self):
-        return self.__obj
-
     def __del__(self):
         _DLL.botan_ec_group_destroy(self.__obj)
+
+    def __eq__(self, other: ECGroup | object) -> bool:
+        if isinstance(other, ECGroup):
+            return _DLL.botan_ec_group_equal(self.__obj, other.handle_()) == 1
+        else:
+            return False
+
+    def __ne__(self, other: ECGroup | object) -> bool:
+        return not self == other
+
+    def handle_(self):
+        return self.__obj
 
     @classmethod
     def supports_application_specific_group(cls) -> bool:
@@ -2646,15 +2652,6 @@ class ECGroup:
         order = MPI()
         _DLL.botan_ec_group_get_order(byref(order.handle_()), self.__obj)
         return order
-
-    def __eq__(self, other: ECGroup | object) -> bool:
-        if isinstance(other, ECGroup):
-            return _DLL.botan_ec_group_equal(self.__obj, other.handle_()) == 1
-        else:
-            return False
-
-    def __ne__(self, other: ECGroup | object) -> bool:
-        return not self == other
 
 
 class FormatPreservingEncryptionFE1:
