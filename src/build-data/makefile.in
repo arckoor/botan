@@ -64,7 +64,7 @@ install: %{install_targets}
 	"$(PYTHON_EXE)" "$(SCRIPTS_DIR)/install.py" --build-dir="%{build_dir}"
 
 check: tests
-	"$(PYTHON_EXE)" "$(SCRIPTS_DIR)/check.py" --build-dir="%{build_dir}"
+	"$(PYTHON_EXE)" "$(SCRIPTS_DIR)/check.py" --build-dir="%{build_dir}"  $(ARGS)
 
 fmt:
 	"$(PYTHON_EXE)" "$(SCRIPTS_DIR)/dev_tools/run_clang_format.py"

@@ -49,10 +49,12 @@ def parse_options(args):
     parser = optparse.OptionParser()
     parser.add_option('--build-dir', default='build', metavar='DIR',
                       help='specify the botan build directory (default %default)')
+    parser.add_option('--disabled-tests', metavar='DISABLED_TESTS', default=[], action='append',
+                      help='Comma separated list of tests that should not be run')
 
     (options, args) = parser.parse_args(args)
 
-    if len(args) > 1:
+    if len(args) > 2:
         raise Exception("Unknown arguments")
 
     return options
@@ -80,8 +82,12 @@ def main(args=None):
     if not os.path.isfile(test_exe) or not os.access(test_exe, os.X_OK):
         raise Exception("Test binary not built")
 
-    run_and_check([test_exe, "--data-dir=%s" % cfg.get('test_data_dir')],
-                  make_environment(build_shared_lib))
+    cmdline = [test_exe, "--data-dir=%s" % cfg.get('test_data_dir')]
+    print(options)
+    if len(options.disabled_tests) > 0:
+        cmdline.append('--skip-tests=%s' % (','.join(options.disabled_tests)))
+
+    run_and_check(cmdline, make_environment(build_shared_lib))
 
     return 0
 
