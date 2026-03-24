@@ -2808,6 +2808,116 @@ class ECGroup:
         return not self == other
 
 
+class ECScalar:
+    def __init__(self, obj: c_void_p | None = None):
+        if not obj:
+            obj = c_void_p(0)
+        self.__obj = obj
+
+    def handle_(self):
+        return self.__obj
+
+    def __del__(self):
+        _DLL.botan_ec_scalar_destroy(self.__obj)
+
+    @classmethod
+    def random(group: ECGroup, rng: RandomNumberGenerator) -> ECScalar:
+        """Create a new scalar with a random value"""
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_random(byref(scalar.handle_()), group.handle_(), rng.handle_())
+        return scalar
+
+    @classmethod
+    def one(group: ECGroup) -> ECScalar:
+        """Create a new scalar with a value of 1"""
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_one(byref(scalar.handle_()), group.handle_())
+        return scalar
+
+    @classmethod
+    def from_mpi(group: ECGroup, mpi: MPI) -> ECScalar:
+        """Convert from an MPI to a scalar. Raises an exception if the MPI is negative or too large."""
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_from_mp(byref(scalar.handle_()), group.handle_(), mpi.handle_())
+
+    def to_bytes(self) -> bytes:
+        return _call_fn_viewing_vec(lambda vc, vfn: _DLL.botan_ec_scalar_view_bytes(self.__obj, vc, vfn))
+
+    def to_mpi(self) -> MPI:
+        mpi = c_void_p(0)
+        _DLL.botan_ec_scalar_to_mp(self.__obj, byref(mpi))
+        return MPI(mpi)
+
+    def is_zero(self) -> bool:
+        rc = _DLL.botan_ec_scalar_is_zero(self.__obj)
+        return rc == 1
+
+    def is_nonzero(self) -> bool:
+        rc = _DLL.botan_ec_scalar_is_nonzero(self.__obj)
+        return rc == 1
+
+    def __eq__(self, other: ECScalar | object) -> bool:
+        if isinstance(other, ECScalar):
+            return _DLL.botan_ec_scalar_is_eq(self.__obj, other.handle_()) == 1
+        else:
+            return False
+
+    def __ne__(self, other: ECScalar | object) -> bool:
+        return not self == other
+
+    def __add__(self, other: ECScalar):
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_add(self.__obj, other.handle_(), byref(scalar.handle_()))
+        return scalar
+
+    def __sub__(self, other: ECScalar):
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_sub(self.__obj, other.handle_(), byref(scalar.handle_()))
+        return scalar
+
+    def __mul__(self, other: ECScalar):
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_mul(self.__obj, other.handle_(), byref(scalar.handle_()))
+        return scalar
+
+    def gk_x_mod_order(self, rng: RandomNumberGenerator) -> ECScalar:
+        """Compute the elliptic curve scalar multiplication g * `self` where g is the standard base
+        point on the curve. Then extract the x coordinate of the resulting point, and reduce it
+        modulo the group order."""
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_gk_x_mod_order(self.__obj, rng.handle_(), byref(scalar.handle_()))
+        return scalar
+
+    def g_mul(self, rng: RandomNumberGenerator) -> ECPoint:
+        """Multiply `self` by the group generator, returning a complete point."""
+        point = ECPoint()
+        _DLL.botan_ec_scalar_g_mul(self.__obj, rng.handle_(), byref(point.handle_()))
+        return point
+
+    def invert(self) -> ECScalar:
+        """Invert `self`."""
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_invert(self.__obj, byref(scalar.handle_()))
+        return scalar
+
+    def invert_vartime(self) -> ECScalar:
+        """Invert `self` **in variable time**."""
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_invert_vartime(self.__obj, byref(scalar.handle_()))
+        return scalar
+
+    def negate(self) -> ECScalar:
+        """Negate `self`"""
+        scalar = ECScalar()
+        _DLL.botan_ec_scalar_negate(self.__obj, byref(scalar.handle_()))
+        return scalar
+
+    def square(self) -> ECScalar:
+        """Set `self` to its own square modulo the group order."""
+        _DLL.botan_ec_scalar_square(self.__obj)
+
+
+
 class FormatPreservingEncryptionFE1:
 
     def __init__(self, modulus: MPI, key: bytes, rounds: int = 5, compat_mode: bool = False):
