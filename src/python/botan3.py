@@ -33,7 +33,7 @@ from enum import IntEnum
 #
 # 3.11.0 - XOF API
 # 3.10.0 - introduced botan_pubkey_load_ec*_sec1()
-BOTAN_FFI_VERSION = 20260303
+BOTAN_FFI_VERSION = 20260505
 
 #
 # Base exception for all exceptions raised from this module
