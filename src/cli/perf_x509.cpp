@@ -12,6 +12,7 @@
 #include <botan/assert.h>
 
 #if defined(BOTAN_HAS_X509)
+   #include <botan/asn1_time.h>
    #include <botan/ber_dec.h>
    #include <botan/bigint.h>
    #include <botan/der_enc.h>

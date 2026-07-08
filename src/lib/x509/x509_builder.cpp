@@ -6,6 +6,7 @@
 
 #include <botan/x509_builder.h>
 
+#include <botan/asn1_time.h>
 #include <botan/assert.h>
 #include <botan/dns_name.h>
 #include <botan/email.h>
@@ -181,7 +182,17 @@ X509_Certificate CertificateParametersBuilder::into_self_signed_cert(std::chrono
                                                                      RandomNumberGenerator& rng,
                                                                      std::optional<std::string_view> hash_fn,
                                                                      std::optional<std::string_view> padding) const {
-   auto signer_p = X509_Object::choose_sig_format(key, rng, hash_fn.value_or(""), padding.value_or(""));
+   return CertificateParametersBuilder::into_cert(not_before, not_after, key, key, rng, hash_fn, padding);
+}
+
+X509_Certificate CertificateParametersBuilder::into_cert(std::chrono::system_clock::time_point not_before,
+                                                         std::chrono::system_clock::time_point not_after,
+                                                         const Private_Key& key,
+                                                         const Private_Key& ca_key,
+                                                         RandomNumberGenerator& rng,
+                                                         std::optional<std::string_view> hash_fn,
+                                                         std::optional<std::string_view> padding) const {
+   auto signer_p = X509_Object::choose_sig_format(ca_key, rng, hash_fn.value_or(""), padding.value_or(""));
    auto& signer = *signer_p;
 
    const AlgorithmIdentifier sig_algo = signer.algorithm_identifier();

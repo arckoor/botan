@@ -65,6 +65,14 @@ class BOTAN_PUBLIC_API(3, 9) CertificateParametersBuilder final {
                                              std::optional<std::string_view> hash_fn = {},
                                              std::optional<std::string_view> padding = {}) const;
 
+      X509_Certificate into_cert(std::chrono::system_clock::time_point not_before,
+                                 std::chrono::system_clock::time_point not_after,
+                                 const Private_Key& key,
+                                 const Private_Key& ca_key,
+                                 RandomNumberGenerator& rng,
+                                 std::optional<std::string_view> hash_fn,
+                                 std::optional<std::string_view> padding) const;
+
       /**
       * Create a PKCS10 request
       *
