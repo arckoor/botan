@@ -562,16 +562,36 @@ def _set_prototypes(dll):
     ffi_api(dll.botan_x509_cert_not_after, [c_void_p, POINTER(c_uint64)])
     ffi_api(dll.botan_x509_cert_get_fingerprint, [c_void_p, c_char_p, c_char_p, POINTER(c_size_t)])
     ffi_api(dll.botan_x509_cert_get_serial_number, [c_void_p, c_char_p, POINTER(c_size_t)])
+    ffi_api(dll.botan_x509_cert_serial_number, [c_void_p, c_void_p])
     ffi_api(dll.botan_x509_cert_get_authority_key_id, [c_void_p, c_char_p, POINTER(c_size_t)])
     ffi_api(dll.botan_x509_cert_get_subject_key_id, [c_void_p, c_char_p, POINTER(c_size_t)])
+    ffi_api(dll.botan_x509_cert_get_public_key_bits, [c_void_p, c_char_p, POINTER(c_size_t)])
     ffi_api(dll.botan_x509_cert_view_public_key_bits, [c_void_p, c_void_p, _VIEW_BIN_CALLBACK])
     ffi_api(dll.botan_x509_cert_get_public_key, [c_void_p, c_void_p])
+    ffi_api(dll.botan_x509_cert_is_ca, [c_void_p])
+    ffi_api(dll.botan_x509_cert_get_path_length_constraint, [c_void_p, POINTER(c_size_t)])
     ffi_api(dll.botan_x509_cert_get_issuer_dn,
             [c_void_p, c_char_p, c_size_t, c_char_p, POINTER(c_size_t)])
+    ffi_api(dll.botan_x509_cert_get_issuer_dn_count, [c_void_p, c_char_p, POINTER(c_size_t)])
     ffi_api(dll.botan_x509_cert_get_subject_dn,
             [c_void_p, c_char_p, c_size_t, c_char_p, POINTER(c_size_t)])
+    ffi_api(dll.botan_x509_cert_get_subject_dn_count, [c_void_p, c_char_p, POINTER(c_size_t)])
     ffi_api(dll.botan_x509_cert_view_as_string, [c_void_p, c_void_p, _VIEW_STR_CALLBACK])
     ffi_api(dll.botan_x509_cert_allowed_usage, [c_void_p, c_uint])
+    ffi_api(dll.botan_x509_cert_allowed_extended_usage_str, [c_void_p, c_char_p])
+    ffi_api(dll.botan_x509_cert_allowed_extended_usage_oid, [c_void_p, c_void_p])
+    ffi_api(dll.botan_x509_general_name_get_type, [c_void_p, POINTER(c_uint)])
+    ffi_api(dll.botan_x509_general_name_view_string_value, [c_void_p, c_void_p, _VIEW_STR_CALLBACK])
+    ffi_api(dll.botan_x509_general_name_view_binary_value, [c_void_p, c_void_p, _VIEW_BIN_CALLBACK])
+    ffi_api(dll.botan_x509_general_name_destroy, [c_void_p])
+    ffi_api(dll.botan_x509_cert_permitted_name_constraints, [c_void_p, c_size_t, c_void_p])
+    ffi_api(dll.botan_x509_cert_permitted_name_constraints_count, [c_void_p, POINTER(c_size_t)])
+    ffi_api(dll.botan_x509_cert_excluded_name_constraints, [c_void_p, c_size_t, c_void_p])
+    ffi_api(dll.botan_x509_cert_excluded_name_constraints_count, [c_void_p, POINTER(c_size_t)])
+    ffi_api(dll.botan_x509_cert_subject_alternative_names, [c_void_p, c_size_t, c_void_p])
+    ffi_api(dll.botan_x509_cert_subject_alternative_names_count, [c_void_p, POINTER(c_size_t)])
+    ffi_api(dll.botan_x509_cert_issuer_alternative_names, [c_void_p, c_size_t, c_void_p])
+    ffi_api(dll.botan_x509_cert_issuer_alternative_names_count, [c_void_p, POINTER(c_size_t)])
     ffi_api(dll.botan_x509_cert_hostname_match, [c_void_p, c_char_p], [-1])
     ffi_api(dll.botan_x509_cert_verify,
             [POINTER(c_int), c_void_p, c_void_p, c_size_t, c_void_p, c_size_t, c_char_p, c_size_t, c_char_p, c_uint64])
@@ -2417,6 +2437,16 @@ def _load_buf_or_file(filename, buf, file_fn, buf_fn):
 #
 # X.509 certificates
 #
+
+class GeneralNameType(IntEnum):
+    """Different types of general name entries from RFC 5280 A.2"""
+    EMAIL_ADDRESS = 1
+    DNS_NAME = 2
+    DIRECTORY_NAME = 4
+    URI = 6
+    IP_ADDRESS = 7
+
+
 class X509Cert: # pylint: disable=invalid-name
     """Class representing an X.509 certificate.
 
@@ -2430,6 +2460,22 @@ class X509Cert: # pylint: disable=invalid-name
 
     def __del__(self):
         _DLL.botan_x509_cert_destroy(self.__obj)
+
+    def __iter_sub_alt_name(self, counter, getter, type: GeneralNameType) -> list[str]:
+        alt_name_cnt = c_size_t(0)
+        counter(self.__obj, byref(alt_name_cnt))
+        entries = []
+        for i in range(alt_name_cnt.value):
+            alt_name = c_void_p(0)
+            getter(self.__obj, c_size_t(i), byref(alt_name))
+            gn_type = c_uint(0)
+            _DLL.botan_x509_general_name_get_type(alt_name, byref(gn_type))
+            if gn_type.value == type:
+                entry = _call_fn_viewing_str(
+                    lambda vc, vfn: _DLL.botan_x509_general_name_view_string_value(alt_name, vc, vfn))
+                entries.append(entry)
+            _DLL.botan_x509_general_name_destroy(alt_name)
+        return entries
 
     def time_starts(self) -> datetime:
         """Return the time the certificate becomes valid, as a string in form
@@ -2518,10 +2564,37 @@ class X509Cert: # pylint: disable=invalid-name
         return _call_fn_returning_str(
             0, lambda b, bl: _DLL.botan_x509_cert_get_issuer_dn(self.__obj, _ctype_str(key), index, b, bl))
 
+    def subject_alt_name(self, type: GeneralNameType) -> list[str]:
+        """Get an entry from the subject alternative name"""
+        return self.__iter_sub_alt_name(
+            _DLL.botan_x509_cert_subject_alternative_names_count,
+            _DLL.botan_x509_cert_subject_alternative_names,
+            type
+        )
+
+    def issuer_alt_name(self, type: GeneralNameType) -> list[str]:
+        """Get an entry from the issuer alternative name"""
+        return self.__iter_sub_alt_name(
+            _DLL.botan_x509_cert_issuer_alternative_names_count,
+            _DLL.botan_x509_cert_issuer_alternative_names,
+            type
+        )
+
     def hostname_match(self, hostname: str) -> bool:
         """Return True if the Common Name (CN) field of the certificate matches a given ``hostname``."""
         rc = _DLL.botan_x509_cert_hostname_match(self.__obj, _ctype_str(hostname))
         return rc == 0
+
+    def is_ca(self) -> bool:
+        """Return True if the certificate is a CA certificate."""
+        rc = _DLL.botan_x509_cert_is_ca(self.__obj)
+        return rc == 1
+
+    def path_length(self) -> int:
+        """Return the path length constraint if present, raises an exception otherwise."""
+        path_length = c_size_t(0)
+        _DLL.botan_x509_cert_get_path_length_constraint(self.__obj, byref(path_length))
+        return path_length.value
 
     def not_before(self) -> int:
         """Return the time the certificate becomes valid, as seconds since epoch."""
@@ -2558,6 +2631,11 @@ class X509Cert: # pylint: disable=invalid-name
         rc = _DLL.botan_x509_cert_allowed_usage(self.__obj, c_uint(usage))
         return rc == 0
 
+    def allowed_extended_usage(self, usage: OID) -> bool:
+        """Return True if the certificate allows the specified extended usage OID."""
+        rc = _DLL.botan_x509_cert_allowed_extended_usage_oid(self.__obj, usage._handle())
+        return rc == 1
+
     def _handle(self):
         return self.__obj
 
@@ -2569,9 +2647,9 @@ class X509Cert: # pylint: disable=invalid-name
         If the extension is not present, an exception will be raised.
 
         Returns all values in the extension, in the form of (v4, v6), where both contain a list of tuples of
-        type (int | None, list[...]). The first element of each tuple is the SAFI, it may be ``None``
+        type ``(int | None, list[...])``. The first element of each tuple is the SAFI, it may be ``None``
         to indicate no SAFI is present. The second element is a list of elements of type
-        tuple[tuple[int], tuple[int]], where each element is a single address range. Each element contains
+        ``tuple[tuple[int], tuple[int]]``, where each element is a single address range. Each element contains
         two tuples of equal length, 4 for IPv4 families and 16 for IPv6 families. The values are the minimum
         and maximum addresses of the range respectively. If the particular family is marked as "inherit",
         the outer tuple will contain ``None`` as its second element instead of a list of ranges."""

@@ -262,7 +262,7 @@ autodoc_default_options = {
     # document members that don't have a docstring
     "undoc-members": True,
     # don't document these
-    "exclude-members": "handle_,cmp"
+    "exclude-members": "cmp"
 }
 
 # resolve these type hints as something else

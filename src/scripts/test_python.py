@@ -1014,11 +1014,16 @@ ofvkP1EDmpx50fHLawIDAQAB
         self.assertFalse(cert.allowed_usage(["DIGITAL_SIGNATURE"]))
         self.assertFalse(cert.allowed_usage(["DIGITAL_SIGNATURE", "CRL_SIGN"]))
 
+        self.assertTrue(cert.is_ca())
+        with self.assertRaises(botan.BotanException):
+            cert.path_length()
+
         root = botan.X509Cert(test_data("src/tests/data/x509/nist/root.crt"))
 
         int09 = botan.X509Cert(test_data("src/tests/data/x509/nist/test09/int.crt"))
         end09 = botan.X509Cert(test_data("src/tests/data/x509/nist/test09/end.crt"))
         self.assertEqual(end09.verify([int09], [root]), 2001)
+        self.assertFalse(end09.is_ca())
 
         end04 = botan.X509Cert(test_data("src/tests/data/x509/nist/test04/end.crt"))
         int04_1 = botan.X509Cert(test_data("src/tests/data/x509/nist/test04/int1.crt"))
@@ -1053,6 +1058,56 @@ ofvkP1EDmpx50fHLawIDAQAB
         self.assertTrue(int20.is_revoked(rootcrl))
         self.assertFalse(int04_1.is_revoked(rootcrl))
         self.assertTrue(end21.is_revoked(int21crl))
+
+        common_01_root = botan.X509Cert(test_data("src/tests/data/x509/bsi/common_01/common_01_root_ca.TA.pem.crt"))
+        self.assertTrue(common_01_root.is_ca())
+        self.assertEqual(common_01_root.path_length(), 1)
+
+        pss_end = botan.X509Cert(test_data("src/tests/data/x509/pss_certs/03/end.crt"))
+        self.assertTrue(pss_end.allowed_extended_usage(botan.OID.from_string("PKIX.ServerAuth")))
+        self.assertFalse(pss_end.allowed_extended_usage(botan.OID.from_string("PKIX.OCSPSigning")))
+
+    def test_cert_alt_names(self):
+        no_alt_cert = botan.X509Cert(test_data("src/tests/data/x509/misc/no_alternative_names.pem"))
+        cert = botan.X509Cert(test_data("src/tests/data/x509/misc/multiple_alternative_names.pem"))
+
+        for type in botan.GeneralNameType:
+            self.assertEqual(len(no_alt_cert.subject_alt_name(type)), 0)
+            self.assertEqual(len(no_alt_cert.issuer_alt_name(type)), 0)
+
+        self.assertEqual(
+            sorted(cert.subject_alt_name(botan.GeneralNameType.EMAIL_ADDRESS)),
+            ["info@x509-labs.com", "testing@x509-labs.com"],
+        )
+        self.assertEqual(
+            sorted(cert.subject_alt_name(botan.GeneralNameType.DNS_NAME)),
+            ["test.x509-labs.com", "trail.x509-labs.com", "versuch.x509-labs.com"],
+        )
+        self.assertEqual(
+            sorted(cert.subject_alt_name(botan.GeneralNameType.URI)),
+            ["http://x509-labs.com", "https://x509-labs.com"],
+        )
+        self.assertEqual(
+            sorted(cert.subject_alt_name(botan.GeneralNameType.IP_ADDRESS)),
+            ["127.0.0.1"],
+        )
+
+        self.assertEqual(
+            len(cert.issuer_alt_name(botan.GeneralNameType.EMAIL_ADDRESS)),
+            0,
+        )
+        self.assertEqual(
+            sorted(cert.issuer_alt_name(botan.GeneralNameType.DNS_NAME)),
+            ["test.x509-labs-ca.com", "trail.x509-labs-ca.com", "versuch.x509-labs-ca.com"],
+        )
+        self.assertEqual(
+            sorted(cert.issuer_alt_name(botan.GeneralNameType.URI)),
+            ["http://x509-labs-ca.com", "https://x509-labs-ca.com"],
+        )
+        self.assertEqual(
+            sorted(cert.issuer_alt_name(botan.GeneralNameType.IP_ADDRESS)),
+            ["192.168.1.1"],
+        )
 
     def test_x509_rejects_embedded_nul_strings(self):
         cert = botan.X509Cert(filename=test_data("src/tests/data/x509/ecc/isrg-root-x2.pem"))
